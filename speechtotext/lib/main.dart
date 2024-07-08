@@ -21,6 +21,8 @@ class MyApp extends StatelessWidget {
 }
 
 class ChatScreen extends StatefulWidget {
+  const ChatScreen({super.key});
+
   @override
   _ChatScreenState createState() => _ChatScreenState();
 }
@@ -29,7 +31,7 @@ class _ChatScreenState extends State<ChatScreen> {
   List<Map<String, String>> messages = [];
   late stt.SpeechToText _speech;
   bool _isListening = false;
-  String _text = 'Press the button and start speaking';
+  String _rawInput = '';
   String _detectedLanguage = '';
 
   @override
@@ -39,146 +41,177 @@ class _ChatScreenState extends State<ChatScreen> {
     _speech = stt.SpeechToText();
   }
 
-  
   Future<void> _requestPermission() async {
     var status = await permission.Permission.microphone.status;
     if (!status.isGranted) {
       await permission.Permission.microphone.request();
     }
   }
-    void _stopListening() {
-    if (_speech.isListening) {
-      _speech.stop();
-      setState(() {
-        _isListening = false;
-        _text = 'Stopped listening';
-      });
-    }
-  }
 
   Future<void> _startListening() async {
-    var status = await permission.Permission.microphone.status;
-    if (!status.isGranted) {
-      status = await permission.Permission.microphone.request();
-      if (!status.isGranted) {
-        print('Microphone permission not granted');
-        return;
+    if (!_isListening) {
+      bool available = await _speech.initialize(
+        onStatus: (status) {
+          print('onStatus: $status');
+          if (status == 'done' && _isListening) {
+            _stopListening();
+            _processInput();
+          }
+
+        },
+        onError: (val) {
+          print('onError: $val');
+          setState(() => _isListening = false);
+        },
+      );
+      if (available) {
+        setState(() => _isListening = true);
+        _speech.listen(
+          onResult: (val) => setState(() {
+            _rawInput = val.recognizedWords;
+          }),
+          listenFor: const Duration(seconds: 30),
+          localeId: "en-US",
+          cancelOnError: true,
+        );
+      } else {
+        setState(() => _isListening = false);
       }
     }
+  }
 
-    bool available = await _speech.initialize(
-      onStatus: (val) => print('onStatus: $val'),
-      onError: (val) => print('onError: $val'),
-    );
-    if (available) {
-      setState(() => _isListening = true);
-      _speech.listen(
-        onResult: (val) => setState(() {
-          _text = val.recognizedWords;
-          if (val.hasConfidenceRating && val.confidence > 0) {
-            _detectAndTranslate(_text);
-          }
-        }),
-      );
-    } else {
-      setState(() => _isListening = false);
+  void _stopListening() {
+    _speech.stop();
+    setState(() => _isListening = false);
+  }
+
+  Future<void> _processInput() async {
+    if (_rawInput.isNotEmpty) {
+      await _detectLanguage(_rawInput);
+      _printMessage();
     }
   }
-  Future<void> _detectAndTranslate(String text) async {
+
+  Future<void> _detectLanguage(String text) async {
     final detectResponse = await http.post(
-      Uri.parse('https://translation.googleapis.com/language/translate/v2/detect'),
+      Uri.parse(
+          'https://translation.googleapis.com/language/translate/v2/detect'),
       headers: {
         'Content-Type': 'application/json',
       },
       body: json.encode({
         'q': text,
-        'key': 'YOUR_GOOGLE_TRANSLATE_API_KEY', // Replace with your Google Translate API key
+        'key':
+            'AIzaSyDQMsGVVXorONBCekfpxxYj-RvV12RIHq0', // Replace with your actual Google Translate API key
       }),
     );
 
     if (detectResponse.statusCode == 200) {
-      var detectedLanguage = json.decode(detectResponse.body)['data']['detections'][0][0]['language'];
-      setState(() {
-        _detectedLanguage = detectedLanguage;
-      });
-
-      if (detectedLanguage != 'en') {
-        final translateResponse = await http.post(
-          Uri.parse('https://translation.googleapis.com/language/translate/v2'),
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: json.encode({
-            'q': text,
-            'target': 'en',
-            'key': 'YOUR_GOOGLE_TRANSLATE_API_KEY', // Replace with your Google Translate API key
-          }),
-        );
-
-        if (translateResponse.statusCode == 200) {
-          var translatedText = json.decode(translateResponse.body)['data']['translations'][0]['translatedText'];
-          setState(() {
-            messages.add({
-              'original': text,
-              'translated': translatedText,
-              'language': detectedLanguage,
-            });
-          });
-        } else {
-          throw Exception('Failed to load translation');
-        }
-      } else {
+      var detections = json.decode(detectResponse.body)['data']['detections'];
+      if (detections.isNotEmpty) {
         setState(() {
-          messages.add({
-            'original': text,
-            'translated': text,
-            'language': 'en',
-          });
+          _detectedLanguage = detections[0][0]['language'];
         });
+      } else {
+        throw Exception('Language detection failed');
       }
     } else {
       throw Exception('Failed to detect language');
     }
   }
 
+  void _printMessage() {
+    setState(() {
+      messages.add({
+        'text': _rawInput,
+        'language': _detectedLanguage,
+      });
+    });
+    print('Detected Language: $_detectedLanguage');
+    print('Original Text: $_rawInput');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Voice to Text Chat with Translation'),
+        title: const Text('SPEECHtOtEXT'),
+        backgroundColor: Colors.teal,
       ),
       body: Column(
         children: <Widget>[
           Expanded(
             child: ListView.builder(
               itemCount: messages.length,
+              padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 10),
               itemBuilder: (context, index) {
-                return ListTile(
-                  title: Text(messages[index]['original'] ?? ''),
-                  subtitle: Text(messages[index]['translated'] ?? ''),
-                  trailing: Text(messages[index]['language'] ?? ''),
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.teal[100],
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            messages[index]['text'] ?? '',
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            messages[index]['language'] ?? '',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey[600]),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 );
               },
             ),
           ),
-          Padding(
+          Container(
+            color: Colors.grey[200],
             padding: const EdgeInsets.all(8.0),
-            child: Row(
-              children: <Widget>[
-                Expanded(
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
                   child: Text(
-                    _text,
-                    style: TextStyle(fontSize: 16.0),
+                    _rawInput.isEmpty ? 'Tap mic to start speaking' : _rawInput,
+                    style: const TextStyle(fontSize: 16.0),
                   ),
                 ),
-                IconButton(
-                  icon: Icon(_isListening ? Icons.mic : Icons.mic_none),
-                  onPressed: _isListening ? _stopListening : _startListening,
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: <Widget>[
+                    Text(
+                      'Detected: $_detectedLanguage',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                    FloatingActionButton(
+                      onPressed:
+                          _isListening ? _stopListening : _startListening,
+                      backgroundColor: Colors.teal,
+                      child: Icon(_isListening ? Icons.mic : Icons.mic_none),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
-          Text('Detected Language: $_detectedLanguage'),
         ],
       ),
     );
